@@ -26,7 +26,7 @@ We treat tissues as **bioelectric–metabolic dynamical systems** and only inter
    Oscillation detector (PLV), neighbor consensus; decoders: rules **and** tiny MLP (WTA + hysteresis + dwell). Compare pulse-preservation vs flicker.
 
 3) **Aim C — Energy safety & microenvironment**  
-   Scalar energy store `E(t)` with actuation cost and optional TNT/EV flux; viability/safety maps; recovery vs naive clamps.
+  Scalar energy store `E(t)` with actuation cost and optional TNT/EV flux; viability/safety maps; recovery vs naïve clamps.
 
 ---
 
@@ -162,7 +162,7 @@ gantt
   M3a: Bounded pulses + caps              :         m3a, 2025-10-09, 1d
   M3b: Recovery/flicker/PLV summaries     :         m3b, 2025-10-10, 1d
   section Experiments
-  M4: Sweeps (D x Emin x duty, TNT flux)  :         m4,  2025-10-11, 3d
+  M4: Sweeps (D × Emin × duty, TNT flux)  :         m4,  2025-10-11, 3d
 ```
 
 ---
@@ -220,7 +220,7 @@ flowchart TB
   U1[Unit: Schmitt hysteresis enter/exit correct]
   U2[Unit: WTA + hysteresis + dwell prevents flicker]
   U3[Unit: PLV bounds 0..1 on sinusoids]
-  U4[Unit: Energy caps honored when E < Emin]
+  U4[Unit: Energy caps honored when E &lt; Emin]
   P1[Property: D→0 ≡ uncoupled (Laplacian invariants)]
   R1[Regression: golden seed reproduces summary.json]
 
@@ -272,13 +272,4 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m polarity_homeostat.experiments.run --config configs/exp_baseline.yaml --out results/exp_baseline
 ```
-
----
-
-### Notes
-- The **Mermaid blocks** (flowchart + wiring + sequence/gantt) will render on GitHub.
-- If you want **even more “spatial” detail**, I can add:
-  - a **sequence diagram** of one simulation step, and
-  - a **state diagram** for the decoder’s WTA + hysteresis + dwell.
-  
 
