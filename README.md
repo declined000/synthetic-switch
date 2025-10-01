@@ -231,7 +231,7 @@ flowchart TB
   U2[Unit: WTA + hysteresis + dwell]
   U3[Unit: PLV bounds 0..1 on sinusoids]
   U4[Unit: Energy caps when E &lt; Emin]
-  P1[Property: D->0 uncoupled (Laplacian invariants)]
+  P1[Property: D to 0 uncoupled (Laplacian invariants)]
   R1[Regression: golden seed reproduces summary.json]
 
   TESTS --> U1
