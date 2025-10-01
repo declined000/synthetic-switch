@@ -171,7 +171,7 @@ gantt
   M3a: Bounded pulses + caps              :         m3a, 2025-10-09, 1d
   M3b: Recovery/flicker/PLV summaries     :         m3b, 2025-10-10, 1d
   section Experiments
-  M4: Sweeps (D × Emin × duty, TNT flux)  :         m4,  2025-10-11, 3d
+  M4: Sweeps (D x Emin x duty, TNT flux)  :         m4,  2025-10-11, 3d
 ```
 
 ---
