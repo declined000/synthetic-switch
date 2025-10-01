@@ -159,19 +159,19 @@ gantt
   title MARMIT Milestones
   dateFormat YYYY-MM-DD
   section Skeleton
-  M0: Repo layout, configs, stubs      :m0,  2025-10-01, 1d
+  Repo layout configs stubs           :m0,  2025-10-01, 1d
   section Sensing
-  M1a: Tissue + Energy integrators     :m1a, 2025-10-02, 2d
-  M1b: Recorder + Oscillator + Atlas   :m1b, 2025-10-04, 2d
+  Tissue and Energy integrators       :m1a, 2025-10-02, 2d
+  Recorder Oscillator Atlas           :m1b, 2025-10-04, 2d
   section Decision and Safety
-  M2a: Rule decoder + tests            :m2a, 2025-10-06, 1d
-  M2b: Tiny MLP + WTA/hyst/dwell       :m2b, 2025-10-07, 1d
-  M2c: Energy/PLV/Geometry gates       :m2c, 2025-10-08, 1d
+  Rule decoder tests                  :m2a, 2025-10-06, 1d
+  Tiny MLP WTA hyst dwell             :m2b, 2025-10-07, 1d
+  Energy PLV Geometry gates           :m2c, 2025-10-08, 1d
   section Actuation and Metrics
-  M3a: Bounded pulses + caps           :m3a, 2025-10-09, 1d
-  M3b: Recovery/flicker/PLV summaries  :m3b, 2025-10-10, 1d
+  Bounded pulses caps                 :m3a, 2025-10-09, 1d
+  Recovery flicker PLV summaries      :m3b, 2025-10-10, 1d
   section Experiments
-  M4: Sweeps D x Emin x duty TNT flux  :m4,  2025-10-11, 3d
+  Sweeps D x Emin x duty TNT flux     :m4,  2025-10-11, 3d
 ```
 
 ---
@@ -227,12 +227,12 @@ python -m polarity_homeostat.experiments.run \
 ```mermaid
 flowchart TB
   TESTS[Tests]
-  U1[Unit - Schmitt hysteresis enter/exit]
-  U2[Unit - WTA + hysteresis + dwell]
-  U3[Unit - PLV bounds 0-1 on sinusoids]
-  U4[Unit - Energy caps when E &lt; Emin]
-  P1[Property - D to 0 uncoupled (Laplacian invariants)]
-  R1[Regression - golden seed reproduces summary.json]
+  U1[Unit Schmitt hysteresis enter exit]
+  U2[Unit WTA hysteresis dwell]
+  U3[Unit PLV bounds 0 to 1 on sinusoids]
+  U4[Unit Energy caps when E &lt; Emin]
+  P1[Property D0 uncoupled Laplacian]
+  R1[Regression golden seed reproduces summary json]
 
   TESTS --> U1
   TESTS --> U2
