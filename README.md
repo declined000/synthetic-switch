@@ -46,18 +46,18 @@ flowchart LR
     E["Energy E(t) (grid)"]
   end
 
-  V --> REC[Recorder<br/>• Schmitt bands (LOW/MID/HIGH)<br/>• Leaky time-in-LOW<br/>• Neighbor mismatch]
+  V --> REC[Recorder<br/>- Schmitt bands (LOW/MID/HIGH)<br/>- Leaky time-in-LOW<br/>- Neighbor mismatch]
   E --> REC
-  V --> OSC[Oscillation Detector<br/>• Band-pass → analytic phase<br/>• PLV vs healthy]
+  V --> OSC[Oscillation Detector<br/>- Band-pass → analytic phase<br/>- PLV vs healthy]
   REC --> FEAT[Feature Vector<br/>&lt;V̄, LOW_occ, mismatch, context, E, PLV&gt;]
   OSC --> FEAT
 
   FEAT --> DEC{Decoder<br/>Rules or Tiny MLP<br/>WTA + Hysteresis + Dwell}
   DEC -->|REST| MON[Monitor]
-  DEC -->|REPAIR| GATES[Safety Gates<br/>Energy / Oscillation / Geometry]
+  DEC -->|REPAIR| GATES[Safety Gates<br/>- Energy / Oscillation / Geometry]
   DEC -->|PRUNE| GATES
 
-  GATES -->|allow| ACT[Actuator<br/>Bounded hyperpolarizing pulses<br/>(amplitude, duty, period, refractory)<br/>+ low-E caps]
+  GATES -->|allow| ACT[Actuator<br/>- Bounded hyperpolarizing pulses<br/>(amplitude, duty, period, refractory)<br/>- low-E caps]
   ACT -->|ΔV| V
   ACT -->|cost| E
 
