@@ -127,12 +127,20 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  R1[Detect chronic LOW without flagging short pulses]
-  R2[Exactly one action active (WTA) with no flicker]
-  R3[Block/cap actions when rhythms are healthy (PLV high)]
-  R4[Block/cap when E &lt; Emin (no zombie forcing)]
-  R5[Avoid electrical islands (neighbor consensus)]
-  R6[Reproducible runs + event atlas + summary metrics]
+  REQS[Requirements]
+  R1[Detect chronic LOW; avoid flagging short pulses]
+  R2[Exactly one action active; no flicker]
+  R3[Block or cap when rhythms healthy; PLV high]
+  R4[Block or cap when E &lt; Emin; no zombie forcing]
+  R5[Avoid electrical islands; neighbor consensus]
+  R6[Reproducible runs; event atlas; summary metrics]
+
+  REQS --> R1
+  REQS --> R2
+  REQS --> R3
+  REQS --> R4
+  REQS --> R5
+  REQS --> R6
 ```
 
 **KPIs**
