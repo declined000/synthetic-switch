@@ -46,7 +46,8 @@ flowchart LR
     E["Energy E(t) (grid)"]
   end
 
-  V & E --> REC[Recorder<br/>• Schmitt bands (LOW/MID/HIGH)<br/>• Leaky time-in-LOW<br/>• Neighbor mismatch]
+  V --> REC[Recorder<br/>• Schmitt bands (LOW/MID/HIGH)<br/>• Leaky time-in-LOW<br/>• Neighbor mismatch]
+  E --> REC
   V --> OSC[Oscillation Detector<br/>• Band-pass → analytic phase<br/>• PLV vs healthy]
   REC --> FEAT[Feature Vector<br/>&lt;V̄, LOW_occ, mismatch, context, E, PLV&gt;]
   OSC --> FEAT
