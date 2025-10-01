@@ -69,40 +69,40 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  subgraph model/
-    TISSUE[tissue.py<br/>RC grid + Laplacian + leak + noise]
-    ENERGY[energy.py<br/>E dynamics + I_pump(E)]
+  subgraph Model
+    TISSUE[tissue.py: RC grid, Laplacian, leak, noise]
+    ENERGY[energy.py: energy dynamics + pump]
   end
 
-  subgraph sensing/
-    RECORDER[recorder.py<br/>Schmitt + leaky LOW + mismatch]
-    OSCILLATOR[osc.py<br/>FFT-Hilbert phase + PLV]
+  subgraph Sensing
+    RECORDER[recorder.py: Schmitt + leaky LOW + mismatch]
+    OSCILLATOR[osc.py: analytic phase + PLV]
   end
 
-  subgraph decoder/
-    RULES[rules.py<br/>threshold tree]
-    MLP[perceptron.py<br/>tiny 6→H→3 + WTA/hyst/dwell]
+  subgraph Decoder
+    RULES[rules.py: threshold tree]
+    MLP[perceptron.py: tiny 6-H-3 + WTA/hyst/dwell]
   end
 
-  subgraph safety/
-    GATE[gates.py<br/>energy / osc / geometry gates]
+  subgraph Safety
+    GATE[gates.py: energy/osc/geometry gates]
   end
 
-  subgraph actuation/
-    PULSES[pulses.py<br/>bounded pulses + caps]
+  subgraph Actuation
+    PULSES[pulses.py: bounded pulses + caps]
   end
 
-  subgraph eval/
-    METRICS[metrics.py<br/>recovery, flicker, PLV retention]
+  subgraph Eval
+    METRICS[metrics.py: recovery, flicker, PLV retention]
   end
 
-  subgraph utils/
-    MATH[math_utils.py<br/>Laplacian, ring buffers, analytic phase]
-    IO[io_utils.py<br/>atlas writer, summaries]
+  subgraph Utils
+    MATH[math_utils.py: Laplacian, ring buffers, analytic phase]
+    IO[io_utils.py: atlas writer, summaries]
   end
 
-  subgraph experiments/
-    RUN[run.py<br/>CLI: config→modules→loop→logs]
+  subgraph Experiments
+    RUN[run.py: CLI config->modules->loop->logs]
   end
 
   TISSUE --> RECORDER
