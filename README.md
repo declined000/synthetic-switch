@@ -23,10 +23,10 @@ We treat tissues as **bioelectric–metabolic dynamical systems** and only inter
    Schmitt banding + leaky time-in-LOW + neighbor mismatch → ROC/PR separating chronic vs transient.
 
 2) **Aim B — Phase-aware action gating & safe decoding**  
-   Oscillation detector (PLV), neighbor consensus; decoders: rules **and** tiny MLP (WTA + hysteresis + dwell). Compare pulse-preservation vs flicker.
+   Oscillation detector (PLV) with persistence (PLV low for ≥ `min_bad_duration_s`) to avoid suppressing wound waves; neighbor consensus; decoders: rules **and** tiny MLP (WTA + hysteresis + dwell). Compare pulse-preservation vs flicker.
 
 3) **Aim C — Energy safety & microenvironment**  
-  Scalar energy store `E(t)` with actuation cost and optional TNT/EV flux; viability/safety maps; recovery vs naïve clamps.
+   Scalar energy store `E(t)` with actuation cost and optional TNT/EV flux; adaptive `E_min` for healing cohorts; viability/safety maps; recovery vs naïve clamps.
 
 ---
 
@@ -47,25 +47,25 @@ We harden the controller against four common failure patterns:
 
 1) **High energy but sick (mutation–energy disconnect).**  
    Cells can have high ATP/ΔΨm yet remain pathologically depolarized (e.g., KRAS/p53 contexts).  
-   **Mitigation:** add **`global_v_offset`** (long‑horizon mean(V) − healthy_ref) to flag chronic depolarization even when E is high; optional **`redox_bit`** as an energy‑quality flag.
+   **Mitigation (implemented):** enable `features.use_global_v_offset`, set `thresholds.global_v_offset_mV`; optionally enable `features.use_redox_bit`.
 
 2) **Whole‑region pathology (consensus inversion).**  
    If most neighbors are depolarized, the local average looks “normal.”  
-   **Mitigation:** track **`domain_low_fraction`** = fraction of cells in LOW; if ≥ threshold, treat the patch as pathological regardless of consensus.
+   **Mitigation (implemented):** enable `features.use_domain_low_fraction`, set `thresholds.domain_low_fraction`.
 
 3) **Low‑energy but healthy healing.**  
    After injury, E(t) often drops during repair; that’s normal.  
-   **Mitigation:** **adaptive `E_min`** — lower the energy gate when many neighbors are low‑E (healing cohort) so gentle REPAIR is still allowed (amplitude/duty caps).
+   **Mitigation (implemented):** enable `energy_extras.adaptive_emin` (k, min) and use `actuation.cap_when_lowE` for gentle REPAIR.
 
 4) **Healing waves look chaotic (PLV dips).**  
    Wound/stress waves are messy and temporarily reduce PLV.  
-   **Mitigation:** require **PLV to stay low for a minimum duration** (`min_bad_duration_s`) before acting (PLV persistence), and optionally use **multi‑band PLV** (act only if multiple bands degrade).
+   **Mitigation (implemented):** set `osc_extras.min_bad_duration_s` (PLV persistence); optional multi‑band PLV if enabled later.
 
 ---
 
 # MARMIT
 
-> **Minimum Architecture, Requirements, Milestones, Interfaces & Testing**  
+> **Minimum Architecture, Requirements & Interfaces**  
 > With **spatial, box-and-arrow diagrams** (Mermaid). GitHub renders these.
 
 ## M — Minimal Architecture (boxes)
@@ -192,27 +192,6 @@ flowchart LR
 
 ---
 
-## R — Milestones (timeline as Gantt)
-
-```mermaid
-gantt
-  title MARMIT Milestones
-  dateFormat YYYY-MM-DD
-  section Skeleton
-  Repo layout configs stubs           :m0,  2025-10-01, 1d
-  section Sensing
-  Tissue and Energy integrators       :m1a, 2025-10-02, 2d
-  Recorder Oscillator Atlas           :m1b, 2025-10-04, 2d
-  section Decision and Safety
-  Rule decoder tests                  :m2a, 2025-10-06, 1d
-  Tiny MLP WTA hyst dwell             :m2b, 2025-10-07, 1d
-  Energy PLV Geometry gates           :m2c, 2025-10-08, 1d
-  section Actuation and Metrics
-  Bounded pulses caps                 :m3a, 2025-10-09, 1d
-  Recovery flicker PLV summaries      :m3b, 2025-10-10, 1d
-  section Experiments
-  Sweeps D x E_min x duty TNT flux    :m4,  2025-10-11, 3d
-```
 
 ---
 
@@ -224,7 +203,7 @@ gantt
 seed: 1337
 
 tissue: { grid: [10,10], dt: 0.005, steps: 3000, EL: -60.0, gL: 0.05, coupling_D: 0.2, noise_rms: 1.0, boundary: periodic }
-energy: { E0: 0.7, k_oxphos: 0.2, alpha_actuation_cost: 0.05, beta_tnt_flux: 0.0, gamma_decay: 0.01, E_min: 0.3 }
+energy: { E0: 0.7, k_oxphos: 0.2, alpha_actuation_cost: 0.05, beta_tnt_flux: 0.0, gamma_decay: 0.01, Emin: 0.3 }
 
 recorder: { low_enter: -15.0, low_exit: -8.0, tau_low: 600.0, mismatch_threshold: 5.0 }
 osc:      { window_seconds: 1200.0, healthy_plv_min: 0.5, downsample: 20 }
@@ -241,7 +220,7 @@ actuation:
   duty: 0.1
   period_s: 300.0
   refractory_s: 600.0
-  cap_when_low_e: { amplitude_mV: -4.0, duty: 0.05 }
+  cap_when_lowE: { amplitude_mV: -4.0, duty: 0.05 }
 
 safety:  { enable_energy_gate: true, enable_osc_gate: true, enable_geometry_gate: true }
 logging: { atlas_stride: 10 }
@@ -262,7 +241,7 @@ osc_extras:
   # bands: [[0.0003,0.003],[0.003,0.03]]
 
 energy_extras:
-  adaptive_e_min:
+  adaptive_emin:
     enabled: true                     # allow gentle REPAIR during cohort healing
     k: 0.50                           # adaptation strength
     min: 0.20                         # never drop below this
@@ -286,75 +265,12 @@ python -m polarity_homeostat.experiments.run \
 
 ---
 
-## T — Testing (unit, property, regression)
-
-```mermaid
-flowchart TB
-  TESTS[Tests]
-  U1[Unit Schmitt hysteresis enter/exit]
-  U2[Unit WTA + hysteresis + dwell (no flicker)]
-  U3[Unit PLV bounds 0..1 on sinusoids]
-  U4[Unit Energy caps when E &lt; E_min]
-  U5[Unit PLV persistence: act only if low ≥ min_bad_duration_s]
-  U6[Unit Adaptive E_min lowers gate in low-E cohorts]
-  P1[Property D→0 uncoupled (Laplacian invariants)]
-  R1[Regression golden seed reproduces summary.json]
-
-  TESTS --> U1
-  TESTS --> U2
-  TESTS --> U3
-  TESTS --> U4
-  TESTS --> U5
-  TESTS --> U6
-  TESTS --> P1
-
-  U1 --> R1
-  U2 --> R1
-  U3 --> R1
-  U4 --> R1
-  U5 --> R1
-  U6 --> R1
-  P1 --> R1
-```
-
-**Target coverage**: ≥80% for logic modules (recorder, decoder, gates).  
-**Golden run**: one fixed seed & config committed for deterministic regression.
 
 ---
 
 ## Limitations & Failure Modes (when the model may not hold)
 
-### ⚠️ 1) High‑energy but malignant (mutation–energy disconnect)
-**What can happen.** Tumor cells can remain chronically depolarized and proliferative while having high ATP/ΔΨm (OXPHOS‑competent), sometimes boosted by mitochondrial import from stroma.  
-**Why the model misses it.** The Energy Gate assumes **E(t)↑ ⇒ healthy/safe**, so high‑E depolarized cells are under‑detected.  
-**Mitigation (planned).** Add **global_v_offset** (long‑horizon mean(V) − healthy_ref) and an **energy‑quality flag** (e.g., `redox_bit`) so REPAIR/PRUNE can trigger when **E high ∧ chronic depol**.
-
-### ⚠️ 2) Oscillation break during healing (low PLV but normal)
-**What can happen.** During wound healing or stress, voltage/Ca²⁺ (and ERK) waves are broadband and irregular; PLV can drop despite healthy repair signaling.  
-**Why the model misses it.** A PLV‑based gate treats **PLV↓ ⇒ pathology** and may suppress these transient, beneficial waves.  
-**Mitigation (planned).** Require **PLV to stay low for ≥ min_bad_duration_s** (persistence) and optionally use **multi‑band PLV** (act only if multiple bands degrade).
-
-### ⚠️ 3) Low‑energy but healthy healing
-**What can happen.** After injury, coordinated repair increases biosynthetic load and resource sharing; **E(t)** drops transiently.  
-**Why the model misses it.** A strict **E(t) < E_min** block withholds gentle help during normal recovery.  
-**Mitigation (planned).** Use **adaptive E_min** in “healing cohorts” (lower the gate when many neighbors are low‑E), and allow **capped‑duty pulses** instead of hard blocking.
-
-### ⚠️ 4) Consensus inversion (pathological baseline looks “normal”)
-**What can happen.** If most cells in a region are depolarized (tumor/infection), the local average re‑centers on a bad baseline, so each cell looks “normal” to its neighbors.  
-**Why the model misses it.** Neighbor‑consensus assumes neighbors are mostly healthy; it hides whole‑patch drift.  
-**Mitigation (planned).** Track **domain_low_fraction** (fraction of cells in LOW) and compare local mean(V) to a **global healthy_ref**; override consensus when a large fraction is LOW.
-
-### ⚠️ 5) Electrical isolation (low coupling)
-**What can happen.** Scar/fibrotic regions reduce gap‑junction coupling (**low D**); neighbor features become unreliable.  
-**Why the model misses it.** Consensus/mismatch rely on coupling; with low D they are noisy or undefined.  
-**Mitigation (planned).** Estimate **D** (e.g., short‑lag spatial correlation) and **de‑weight consensus** below a threshold; fall back to self + global metrics.
-
-### ⚠️ 6) Decoder confusion near boundaries (flicker)
-**What can happen.** Features sit near REST/REPAIR boundary; scores are similar.  
-**Why the model misses it.** Even with hysteresis and dwell, small noise can still toggle actions.  
-**Mitigation (planned).** Add a **decision cool‑down** (lockout after switches) and a slightly larger **score margin** before changing actions.
-
-### ⚠️ 7) Synthetic‑data bias (distribution shift)
+### ⚠️ 1) Synthetic‑data bias (distribution shift)
 **What can happen.** Thresholds and ROC/PR calibration tuned on simulations may not match real rhythm timescales or noise spectra.  
 **Why the model misses it.** Mis‑tuned detectors increase false positives/negatives in vivo.  
 **Mitigation (planned).** Enable **self‑calibration** (slowly adapt τ_low and PLV thresholds to maintain target error rates) and validate on held‑out scenarios.
@@ -368,7 +284,6 @@ flowchart TB
 * **Recovery curves** (bounded pulses vs clamps; pulse‑preservation).
 * **Safety envelopes** (E_min, duty, coupling D; TNT/EV scenarios).
 
-**KPIs we will report**: false‑suppression rate (repair pulses), time‑to‑recovery, control energy cost, domain coherence, action‑flicker rate.
 
 ---
 
@@ -406,16 +321,7 @@ figures/        # (gitignored)
 
 ---
 
-## Example Biological Implementations (optional)
 
-Voltage sensors (ArcLight/ASAP) → Recorder (V_mem)
-
-ERK‑KTR / mito‑ΔΨm reporters → Oscillation/Energy features
-
-Inducible ion channels/pumps → Actuator (bounded hyperpolarizing pulses)
-
-Logic in cells (e.g., promoter/RBS weights, mutual repression) → Rule‑tree / tiny MLP analogs  
-These map our computational modules to plausible wet‑lab parts if pursued later.
 
 ## Usage (once code lands)
 
