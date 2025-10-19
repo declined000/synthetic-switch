@@ -1,0 +1,15 @@
+# Python caches and envs
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env/
+
+# Project outputs (do not commit run artifacts)
+results/
+figures/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
