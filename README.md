@@ -43,7 +43,7 @@ These are illustrative and configurable in `configs/*.yaml`.
 
 ## Mitigations for Known Failure Cases (what we implement)
 
-We harden the controller against four common failure patterns:
+We hardened the controller against four common failure patterns:
 
 1) **High energy but sick (mutation–energy disconnect).**  
    Cells can have high ATP/ΔΨm yet remain pathologically depolarized (e.g., KRAS/p53 contexts).  
@@ -65,8 +65,7 @@ We harden the controller against four common failure patterns:
 
 # MARMIT
 
-> **Minimum Architecture, Requirements & Interfaces**  
-> With **spatial, box-and-arrow diagrams** (Mermaid). GitHub renders these.
+> **Minimum Architecture, Requirements & Interfaces**
 
 ## M — Minimal Architecture (boxes)
 
@@ -192,9 +191,6 @@ flowchart LR
 
 ---
 
-
----
-
 ## I — Interfaces (configs, CLI, outputs)
 
 ### Config (YAML contract)
@@ -266,8 +262,6 @@ python -m polarity_homeostat.experiments.run \
 ---
 
 
----
-
 ## Limitations & Failure Modes (when the model may not hold)
 
 ### ⚠️ 1) Synthetic‑data bias (distribution shift)
@@ -287,19 +281,6 @@ python -m polarity_homeostat.experiments.run \
 
 ---
 
-## Implementation Notes (where each mitigation lives)
-
-`sensing/recorder.py` — compute `domain_low_fraction` (% LOW); `global_v_offset` (EMA of mean(V) − healthy_ref).
-
-`sensing/osc.py` — enforce `min_bad_duration_s`; optional multi‑band PLV if enabled.
-
-`safety/gates.py` — implement adaptive `E_min`; allow gentle REPAIR (cap amplitude/duty) in low‑E cohorts; de‑weight consensus when `D_est` low.
-
-`utils/math_utils.py` — quick coupling estimator (`D_est`) via short‑lag spatial correlation.
-
-`experiments/run.py` — pass new features to decoder; append them to `event_atlas.csv`.
-
-`tests/*` — add unit tests for PLV persistence, adaptive `E_min`, consensus override, and coupling fallback.
 
 ## Repository Layout (to implement)
 
