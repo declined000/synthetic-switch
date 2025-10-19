@@ -6,8 +6,10 @@ __pycache__/
 .env/
 
 # Project outputs (do not commit run artifacts)
-results/
-figures/
+results/*
+!results/.gitkeep
+figures/*
+!figures/.gitkeep
 
 # OS/editor noise
 .DS_Store
