@@ -1,0 +1,46 @@
+seed: 1337
+
+tissue: { grid: [10,10], dt: 0.005, steps: 3000, EL: -60.0, healthy_ref_mV: -55.0, gL: 0.05, coupling_D: 0.2, noise_rms: 1.0, boundary: periodic }
+energy: { E0: 0.7, k_oxphos: 0.2, alpha_actuation_cost: 0.05, beta_tnt_flux: 0.0, gamma_decay: 0.01, Emin: 0.3 }
+
+recorder: { low_enter: -15.0, low_exit: -8.0, tau_low: 600.0, mismatch_threshold: 0.30 }
+osc:      { window_seconds: 1200.0, healthy_plv_min: 0.5, downsample: 20 }
+
+decoder:
+  type: rules         # rules | perceptron
+  hysteresis_margin: 0.05
+  decision_dwell: 50
+  perceptron: { hidden: 8 }
+  rules:      { low_occ_threshold: 0.30, energy_ok: 0.35, mismatch_ok: 0.30 }
+
+actuation:
+  amplitude_mV: -10.0
+  duty: 0.1
+  period_s: 300.0
+  refractory_s: 600.0
+  cap_when_lowE: { amplitude_mV: -4.0, duty: 0.05 }
+
+safety:  { enable_energy_gate: true, enable_osc_gate: true, enable_geometry_gate: true }
+logging: { atlas_stride: 10 }
+
+# mitigation features
+features:
+  use_global_v_offset: true
+  use_domain_low_fraction: true
+  use_redox_bit: false
+
+thresholds:
+  global_v_offset_mV: 10.0
+  domain_low_fraction: 0.40
+
+osc_extras:
+  min_bad_duration_s: 600
+
+energy_extras:
+  adaptive_emin:
+    enabled: true
+    k: 0.5
+    min: 0.2
+
+geometry:
+  min_coupling_for_consensus: 0.1
