@@ -40,7 +40,7 @@ def main():
 	out_dir = ensure_out_dir(args.out)
 	print(f"Starting run → out={out_dir}", flush=True)
 
-	# Milestone 9: add metrics collection
+	# Milestone 9 + fixes: enable consensus via D_est; feed offset/domain to decoder
 	tcfg = cfg["tissue"]
 	ecfg = cfg["energy"]
 	rcfg = RecorderConfig(**cfg["recorder"])
@@ -59,9 +59,12 @@ def main():
 		energy_ok=float(rules_cfg.get("energy_ok", 0.35)),
 		mismatch_ok=float(rules_cfg.get("mismatch_ok", 0.30)),
 		healthy_plv_min=float(ocfg.healthy_plv_min),
+		global_v_offset_mV=float(cfg.get("thresholds", {}).get("global_v_offset_mV", 10.0)),
+		domain_low_fraction=float(cfg.get("thresholds", {}).get("domain_low_fraction", 0.40)),
 	)
 
 	min_coupling = float(geom_cfg.get("min_coupling_for_consensus", 0.1))
+	estimate_coupling = bool(geom_cfg.get("estimate_coupling", True))
 	grid_h, grid_w = int(tcfg["grid"][0]), int(tcfg["grid"][1])
 	dt = float(tcfg["dt"])
 	steps = int(tcfg["steps"])
@@ -96,6 +99,10 @@ def main():
 	healthy_ref = float(tcfg.get("healthy_ref_mV", float(tcfg["EL"]) + 5.0))
 	recorder.set_healthy_ref(healthy_ref)
 
+	# Optional window for coupling estimation
+	V_window = []
+	max_frames = 50
+
 	# Metric series
 	actions_series = []
 	plv_series = []
@@ -114,10 +121,29 @@ def main():
 		E_mean = float(energy.E.mean())
 		plv, plv_bad = osc.plv_with_persistence()
 		plv_series.append(plv)
-		domain_low_series.append(float(recorder.domain_low_fraction()))
+		domain_low_frac = float(recorder.domain_low_fraction())
+		domain_low_series.append(domain_low_frac)
+		global_v_off = float(recorder.global_v_offset(V)) if False else float(recorder.global_v_offset(V))
 
-		action = decoder.decide(low_occ=low_occ_mean, mismatch=mismatch_mean, E=E_mean, plv=(plv if plv is not None else None))
+		# Decoder action with offset/domain context
+		action = decoder.decide(
+			low_occ=low_occ_mean,
+			mismatch=mismatch_mean,
+			E=E_mean,
+			plv=(plv if plv is not None else None),
+			global_v_offset_mV=global_v_off,
+			domain_low_fraction=domain_low_frac,
+		)
 		actions_series.append(action)
+
+		# Coupling estimate for geometry gate
+		D_est = None
+		if estimate_coupling:
+			V_window.append(V.copy())
+			if len(V_window) > max_frames:
+				V_window.pop(0)
+			if len(V_window) >= 4:
+				D_est = float(estimate_coupling_shortlag(np.stack(V_window, axis=0)))
 
 		domain_lowE_fraction = float(np.mean(energy.E < float(ecfg["Emin"])))
 		Emin_eff = compute_adaptive_emin(
@@ -129,7 +155,7 @@ def main():
 		)
 		Eok = energy_gate(E_mean, Emin_eff) if cfg["safety"].get("enable_energy_gate", True) else True
 		OscOK = oscillation_gate(bool(plv_bad)) if cfg["safety"].get("enable_osc_gate", True) else True
-		GeomOK = geometry_gate(mismatch_mean, float(rcfg.mismatch_threshold), None, min_coupling) \
+		GeomOK = geometry_gate(mismatch_mean, float(rcfg.mismatch_threshold), D_est, min_coupling) \
 			if cfg["safety"].get("enable_geometry_gate", True) else True
 		allow_pulse = (action == 1) and Eok and OscOK and GeomOK
 
@@ -139,9 +165,7 @@ def main():
 
 		V = tissue.V
 		mean_V = float(V.mean())
-		global_v_off = float(recorder.global_v_offset(V))
-		domain_low_frac = float(recorder.domain_low_fraction())
-		D_est = ""
+		# reuse global_v_off/domain_low_frac already computed
 
 		if step % atlas_stride == 0:
 			rows.append([
@@ -155,7 +179,7 @@ def main():
 				global_v_off,
 				domain_low_frac,
 				0.0,
-				D_est,
+				("" if D_est is None else D_est),
 			])
 
 	atlas_cols = [
@@ -167,7 +191,6 @@ def main():
 		writer.writerow(atlas_cols)
 		writer.writerows(rows)
 
-	# Compute metrics
 	recovery_step = compute_recovery_time(domain_low_series, dt=dt, threshold=0.10, dwell_s=60.0)
 	flicker = compute_flicker_rate(actions_series, dt=dt, warmup_s=0.0)
 	plv_ret = compute_plv_retention(plv_series, dt=dt, window_s=300.0)
