@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, Optional
 import numpy as np
 
-from ..utils.math_utils import laplacian_2d
+from ..utils.math_utils import laplacian_2d, laplacian_2d_neumann
 
 
 @dataclass
@@ -21,7 +21,7 @@ class TissueConfig:
 class Tissue:
 	"""
 	Simple RC grid with leak to EL and diffusive coupling (Laplacian), plus Gaussian noise.
-	Explicit Euler integration; periodic boundary via np.roll in Laplacian.
+	Explicit Euler integration; boundary: 'periodic' or 'neumann' (no-flux).
 	"""
 	def __init__(self, cfg: TissueConfig, seed: Optional[int] = None):
 		self.cfg = cfg
@@ -37,9 +37,15 @@ class Tissue:
 		else:
 			self.V.fill(float(v0))
 
+	def _lap(self, V: np.ndarray) -> np.ndarray:
+		b = (self.cfg.boundary or "periodic").lower()
+		if b == "neumann":
+			return laplacian_2d_neumann(V)
+		return laplacian_2d(V)
+
 	def step(self, u_act: Optional[np.ndarray] = None) -> None:
 		V = self.V
-		lap = laplacian_2d(V)
+		lap = self._lap(V)
 		leak = -self.cfg.gL * (V - self.cfg.EL)
 		diff = self.cfg.coupling_D * lap
 		noise = self._rng.normal(0.0, self.cfg.noise_rms, size=V.shape) if self.cfg.noise_rms > 0 else 0.0

@@ -10,6 +10,18 @@ def laplacian_2d(field: np.ndarray) -> np.ndarray:
 	return up + down + left + right - 4.0 * field
 
 
+def laplacian_2d_neumann(field: np.ndarray) -> np.ndarray:
+	"""5-point Laplacian with Neumann (zero-flux) boundaries via edge replication."""
+	# Pad with edge values, then apply interior stencil and slice back
+	p = np.pad(field, pad_width=1, mode="edge")
+	up    = p[:-2, 1:-1]
+	down  = p[2:,  1:-1]
+	left  = p[1:-1, :-2]
+	right = p[1:-1, 2:]
+	center = p[1:-1, 1:-1]
+	return up + down + left + right - 4.0 * center
+
+
 # --- NEW: simple EMA + coupling estimator ---
 
 def ema_update(prev: float, x: float, alpha: float) -> float:

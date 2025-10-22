@@ -12,6 +12,12 @@ class RulesThresholds:
 	healthy_plv_min: float = 0.50  # provided from osc config
 	global_v_offset_mV: float = 10.0
 	domain_low_fraction: float = 0.40
+	# Strict PRUNE (demo-only)
+	prune_enabled: bool = False
+	prune_low_occ_threshold: float = 0.85
+	prune_energy_max: float = 0.20
+	prune_mismatch_min: float = 0.60
+	prune_dwell_steps: int = 200
 
 
 @dataclass
@@ -32,6 +38,7 @@ class RulesDecoder:
 		self.st = stability
 		self._last_action: int = 0
 		self._hold_steps: int = 0  # countdown; when > 0, block switches
+		self._prune_steps: int = 0  # strict dwell for prune evidence
 
 	@staticmethod
 	def _clamp01(x: float) -> float:
@@ -45,6 +52,7 @@ class RulesDecoder:
 		plv: Optional[float],
 		global_v_offset_mV: float,
 		domain_low_fraction: float,
+		prune_cond: bool,
 	) -> Tuple[float, float, float]:
 		"""
 		Return soft scores (rest, repair, prune) in [0,1].
@@ -76,8 +84,11 @@ class RulesDecoder:
 		]
 		rest_score = sum(1.0 for c in rest_conds if c) / float(len(rest_conds))
 
-		# PRUNE disabled for now (leave at 0)
-		prune_score = 0.0
+		# PRUNE strict: require sustained prune_cond
+		if self.th.prune_enabled and prune_cond and self._prune_steps >= max(1, int(self.th.prune_dwell_steps)):
+			prune_score = 1.0
+		else:
+			prune_score = 0.0
 
 		return (
 			self._clamp01(rest_score),
@@ -98,8 +109,20 @@ class RulesDecoder:
 		if self._hold_steps > 0:
 			self._hold_steps -= 1
 
+		# Update prune evidence dwell counter
+		if self.th.prune_enabled:
+			prune_cond = (
+				low_occ >= self.th.prune_low_occ_threshold and
+				E <= self.th.prune_energy_max and
+				mismatch >= self.th.prune_mismatch_min
+			)
+			self._prune_steps = self._prune_steps + 1 if prune_cond else 0
+		else:
+			prune_cond = False
+			self._prune_steps = 0
+
 		rest_s, repair_s, prune_s = self._scores(
-			low_occ, mismatch, E, plv, global_v_offset_mV, domain_low_fraction
+			low_occ, mismatch, E, plv, global_v_offset_mV, domain_low_fraction, prune_cond
 		)
 		scores = [rest_s, repair_s, prune_s]
 		proposed = int(max(range(3), key=lambda i: scores[i]))
@@ -111,7 +134,7 @@ class RulesDecoder:
 				return current
 			# Require a margin to switch
 			margin = scores[proposed] - scores[current]
-			if margin < self.st.hysteresis_margin:
+			if margin <= self.st.hysteresis_margin:
 				return current
 			# Accept switch and reset dwell
 			self._last_action = proposed

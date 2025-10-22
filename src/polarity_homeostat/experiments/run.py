@@ -40,11 +40,15 @@ def main():
 	out_dir = ensure_out_dir(args.out)
 	print(f"Starting run → out={out_dir}", flush=True)
 
-	# Milestone 9 + fixes: enable consensus via D_est; feed offset/domain to decoder
+	# Build configs
 	tcfg = cfg["tissue"]
 	ecfg = cfg["energy"]
 	rcfg = RecorderConfig(**cfg["recorder"])
-	ocfg = OscConfig(**cfg["osc"], min_bad_duration_s=float(cfg.get("osc_extras", {}).get("min_bad_duration_s", 0.0)))
+	osc_cfg_raw = dict(cfg["osc"])
+	# Light band-pass default (optional): pass bands only if provided in YAML; else leave None
+	if "bandpass" in cfg.get("osc", {}):
+		osc_cfg_raw["bandpass"] = tuple(cfg["osc"]["bandpass"])  # [lo, hi]
+	ocfg = OscConfig(**osc_cfg_raw, min_bad_duration_s=float(cfg.get("osc_extras", {}).get("min_bad_duration_s", 0.0)))
 	geom_cfg = cfg.get("geometry", {})
 	a_cfg = ActuationConfig(**cfg["actuation"])  # amplitude_mV, duty, period_s, refractory_s, cap_when_lowE
 
@@ -108,6 +112,9 @@ def main():
 	plv_series = []
 	domain_low_series = []
 
+	# Global V offset persistence for override
+	gvo_bad_seconds = 0.0
+
 	rows = []
 	for step in range(steps):
 		osc.update(tissue.V)
@@ -123,7 +130,7 @@ def main():
 		plv_series.append(plv)
 		domain_low_frac = float(recorder.domain_low_fraction())
 		domain_low_series.append(domain_low_frac)
-		global_v_off = float(recorder.global_v_offset(V)) if False else float(recorder.global_v_offset(V))
+		global_v_off = float(recorder.global_v_offset(V))
 
 		# Decoder action with offset/domain context
 		action = decoder.decide(
@@ -145,6 +152,7 @@ def main():
 			if len(V_window) >= 4:
 				D_est = float(estimate_coupling_shortlag(np.stack(V_window, axis=0)))
 
+		# Energy gate with adaptive Emin
 		domain_lowE_fraction = float(np.mean(energy.E < float(ecfg["Emin"])))
 		Emin_eff = compute_adaptive_emin(
 			float(ecfg["Emin"]),
@@ -154,9 +162,22 @@ def main():
 			float(cfg.get("energy_extras", {}).get("adaptive_emin", {}).get("min", float(ecfg["Emin"]))),
 		)
 		Eok = energy_gate(E_mean, Emin_eff) if cfg["safety"].get("enable_energy_gate", True) else True
+
+		# Oscillation gate with PLV persistence + global_v_offset override (sustained high offset)
 		OscOK = oscillation_gate(bool(plv_bad)) if cfg["safety"].get("enable_osc_gate", True) else True
+		gvo_thresh = float(cfg.get("thresholds", {}).get("global_v_offset_mV", 10.0))
+		if abs(global_v_off) >= gvo_thresh:
+			gvo_bad_seconds += dt
+		else:
+			gvo_bad_seconds = max(0.0, gvo_bad_seconds - dt)
+		# If sustained offset high for same persistence window, treat as bad oscillation
+		if gvo_bad_seconds >= float(cfg.get("osc_extras", {}).get("min_bad_duration_s", 0.0)):
+			OscOK = True
+
+		# Geometry gate
 		GeomOK = geometry_gate(mismatch_mean, float(rcfg.mismatch_threshold), D_est, min_coupling) \
 			if cfg["safety"].get("enable_geometry_gate", True) else True
+
 		allow_pulse = (action == 1) and Eok and OscOK and GeomOK
 
 		u_act = actuator.step(allow=allow_pulse, E_ok=Eok, shape=V.shape)
@@ -165,7 +186,6 @@ def main():
 
 		V = tissue.V
 		mean_V = float(V.mean())
-		# reuse global_v_off/domain_low_frac already computed
 
 		if step % atlas_stride == 0:
 			rows.append([

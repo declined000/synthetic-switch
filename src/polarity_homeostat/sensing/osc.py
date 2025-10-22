@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import numpy as np
-from scipy.signal import hilbert
+from scipy.signal import hilbert, butter, filtfilt
 
 
 @dataclass
@@ -13,13 +13,17 @@ class OscConfig:
 	downsample: int = 20
 	min_bad_duration_s: float = 0.0  # persistence guard
 	bands: Optional[list] = None      # placeholder; not used in M3
+	# Optional light band-pass (Hz in cycles/second of the sampled mean(V) series)
+	# Provide (low_Hz, high_Hz) relative to 1/(dt*downsample). If None, skip.
+	bandpass: Optional[Tuple[float, float]] = None
 
 
 class OscillationDetector:
 	"""
 	Maintains a downsampled buffer of mean V and computes a simple PLV
 	from its analytic phase via Hilbert transform. Adds a persistence
-	threshold so transient dips do not trigger.
+	threshold so transient dips do not trigger. Optional light band-pass
+	before Hilbert to approximate README parity.
 	"""
 	def __init__(self, cfg: OscConfig, grid: Tuple[int, int], dt: float):
 		self.cfg = cfg
@@ -46,6 +50,23 @@ class OscillationDetector:
 		self._buf_idx = (self._buf_idx + 1) % self._buf_len
 		self._buf_count = min(self._buf_count + 1, self._buf_len)
 
+	def _maybe_bandpass(self, x: np.ndarray) -> np.ndarray:
+		if not self.cfg.bandpass:
+			return x
+		lo, hi = self.cfg.bandpass
+		fs = 1.0 / (self.dt * self._ds)
+		# Normalize to Nyquist
+		nyq = 0.5 * fs
+		lo_n = max(1e-6, float(lo) / nyq)
+		hi_n = min(0.999, float(hi) / nyq)
+		if lo_n >= hi_n:
+			return x
+		b, a = butter(N=2, Wn=[lo_n, hi_n], btype="band")
+		try:
+			return filtfilt(b, a, x, method="pad")
+		except Exception:
+			return x
+
 	def _compute_plv(self) -> Optional[float]:
 		if self._buf_count < 8:
 			return None
@@ -58,6 +79,8 @@ class OscillationDetector:
 		x = x - float(np.mean(x))
 		if np.allclose(x, 0.0):
 			return 0.0
+		# Optional light band-pass
+		x = self._maybe_bandpass(x)
 		z = hilbert(x)
 		phase = np.angle(z)
 		plv = float(np.abs(np.mean(np.exp(1j * phase))))
