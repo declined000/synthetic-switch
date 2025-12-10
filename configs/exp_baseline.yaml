@@ -3,7 +3,7 @@ seed: 1337
 tissue: { grid: [10,10], dt: 0.1, steps: 10000, EL: -60.0, healthy_ref_mV: -55.0, gL: 0.05, coupling_D: 0.2, noise_rms: 1.0, boundary: periodic }
 energy: { E0: 0.7, k_oxphos: 0.2, alpha_actuation_cost: 0.05, beta_tnt_flux: 0.0, gamma_decay: 0.01, Emin: 0.3 }
 
-recorder: { low_enter: -15.0, low_exit: -8.0, tau_low: 600.0, mismatch_threshold: 0.30 }
+recorder: { low_enter: -12.0, low_exit: -18.0, tau_low: 600.0, mismatch_threshold: 0.30 }
 osc:      { window_seconds: 300.0, healthy_plv_min: 0.5, downsample: 50, bandpass: [0.003, 0.03] }
 
 decoder:

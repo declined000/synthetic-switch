@@ -3,11 +3,11 @@
 Compute ROC and PR curves from domain_atlas.csv.
 
 Ground truth:
-  - A domain is labeled "chronic" if its mean domain_low_fraction_dom
+  - A domain is labeled "chronic" if its mean LOW_occ_dom
     over the *entire* simulation is >= gt_threshold.
 
 Score:
-  - For each domain, we compute mean(domain_low_fraction_dom) over
+  - For each domain, we compute mean(LOW_occ_dom) over
     the last `late_window` seconds (or full run if shorter). This is
     the detection score; high score → more likely chronic.
 
@@ -96,7 +96,7 @@ def main():
 	parser.add_argument("--domain_atlas", required=True, help="Path to domain_atlas.csv")
 	parser.add_argument("--out", required=True, help="Output directory for ROC/PR JSON")
 	parser.add_argument("--gt_threshold", type=float, default=0.5,
-	                    help="Threshold on mean domain_low_fraction_dom to label a domain as chronic")
+	                    help="Threshold on mean LOW_occ_dom to label a domain as chronic")
 	parser.add_argument("--late_window", type=float, default=300.0,
 	                    help="Window [t_max - late_window, t_max] over which to compute detection scores")
 	args = parser.parse_args()
@@ -105,8 +105,8 @@ def main():
 	out_dir = Path(args.out)
 	out_dir.mkdir(parents=True, exist_ok=True)
 
-	if "domain_id" not in df.columns or "domain_low_fraction_dom" not in df.columns:
-		raise ValueError("domain_atlas.csv must contain 'domain_id' and 'domain_low_fraction_dom' columns")
+	if "domain_id" not in df.columns or "LOW_occ_dom" not in df.columns:
+		raise ValueError("domain_atlas.csv must contain 'domain_id' and 'LOW_occ_dom' columns")
 
 	t_max = float(df["t"].max())
 	late_start = max(0.0, t_max - float(args.late_window))
@@ -119,16 +119,16 @@ def main():
 	for dom_id in domain_ids:
 		d = df[df["domain_id"] == dom_id]
 
-		# Ground truth: chronic if mean fraction over entire run >= gt_threshold
-		mean_low_full = float(d["domain_low_fraction_dom"].mean())
+		# Ground truth: chronic if mean LOW occupancy over entire run >= gt_threshold
+		mean_low_full = float(d["LOW_occ_dom"].mean())
 		labels.append(1 if mean_low_full >= args.gt_threshold else 0)
 
-		# Detection score: mean fraction over last late_window seconds
+		# Detection score: mean LOW occupancy over last late_window seconds
 		d_late = d[d["t"] >= late_start]
 		if len(d_late) == 0:
 			mean_low_late = mean_low_full
 		else:
-			mean_low_late = float(d_late["domain_low_fraction_dom"].mean())
+			mean_low_late = float(d_late["LOW_occ_dom"].mean())
 		scores.append(mean_low_late)
 
 	scores = np.asarray(scores, dtype=float)
