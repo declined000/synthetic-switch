@@ -15,6 +15,30 @@ from ..actuation.pulses import PulseActuator, ActuationConfig
 from ..decoder.rules import RulesDecoder, RulesThresholds, DecoderStability
 from ..eval.metrics import compute_recovery_time, compute_flicker_rate, compute_plv_retention
 
+"""
+Biological mapping (sentinel cell circuit)
+
+- V_mem sensor (NFAT/CREB + Signal V) → TF_depol
+    ≈ Recorder.low_occ (time-in-LOW band); tf_depol = mean(low_occ)
+
+- Energy sensor (AMPK-responsive promoter) → TF_EnergyOK
+    ≈ Energy.E grid + energy_gate(E_mean, Emin_eff)
+
+- Geometry sensor (paracrine/gap-junction comparison) → TF_GeometryOK
+    ≈ neighbor_mismatch(V) + geometry_gate(...)
+
+- Global state sensor (frequency-sensitive CREB / NFAT) → TF_GlobalOK
+    ≈ OscillationDetector (PLV with persistence) + global_v_offset override
+
+- Logic / memory:
+    RulesDecoder (REST / REPAIR / PRUNE) with hysteresis + dwell
+    ↔ dCas9 CRISPRi/a logic implementing REST/REPAIR/PRUNE and gates.
+
+- Factor H gene / protein:
+    PulseActuator: Hill(TF_depol; n, K_H) scales amplitude of Kir2.1-like
+    hyperpolarizing pulses under energy + oscillation + geometry gates.
+"""
+
 
 def parse_args():
 	parser = argparse.ArgumentParser()
@@ -132,6 +156,11 @@ def main():
 		domain_low_series.append(domain_low_frac)
 		global_v_off = float(recorder.global_v_offset(V))
 
+		# --- NEW: transcription-factor proxy for depolarization (TF_depol) ---
+		# Recorder.low_occ is already a leaky LOW-occupancy fraction in [0,1].
+		# We treat its spatial mean as the domain-level TF_depol driving Factor H.
+		tf_depol = max(0.0, min(1.0, low_occ_mean))
+
 		# Decoder action with offset/domain context
 		action = decoder.decide(
 			low_occ=low_occ_mean,
@@ -180,7 +209,12 @@ def main():
 
 		allow_pulse = (action == 1) and Eok and OscOK and GeomOK
 
-		u_act = actuator.step(allow=allow_pulse, E_ok=Eok, shape=V.shape)
+		u_act = actuator.step(
+			allow=allow_pulse,
+			E_ok=Eok,
+			shape=V.shape,
+			depol_signal=tf_depol,  # TF_depol → Hill → Factor H → Kir2.1 efflux
+		)
 		tissue.step(u_act=u_act)
 		energy.step(dt=dt, u_act=u_act, u_tnt_ev=0.0)
 
