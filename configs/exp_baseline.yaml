@@ -34,6 +34,17 @@ domains:
     frac: 0.25    # fraction of domains with h_k = 0 (controller lost)
     seed: 1337    # RNG seed for reproducibility
 
+injuries:
+  domains:
+    # Example: domain 0 = chronically depolarized + low energy
+    - id: 0
+      delta_V_mV: 15.0   # shift V by +15 mV (less negative → more depolarized)
+      E0: 0.4            # lower energy in that domain
+
+    # Example: domain 1 = mildly depolarized, normal energy
+    - id: 1
+      delta_V_mV: 8.0
+
 safety:  { enable_energy_gate: true, enable_osc_gate: true, enable_geometry_gate: true }
 logging: { atlas_stride: 10 }
 

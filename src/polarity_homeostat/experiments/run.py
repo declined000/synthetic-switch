@@ -14,6 +14,7 @@ from ..safety.gates import energy_gate, compute_adaptive_emin, oscillation_gate,
 from ..actuation.pulses import PulseActuator, ActuationConfig
 from ..decoder.rules import RulesDecoder, RulesThresholds, DecoderStability
 from ..eval.metrics import compute_recovery_time, compute_flicker_rate, compute_plv_retention
+from .injuries import apply_domain_injuries
 
 """
 Biological mapping (sentinel cell circuit)
@@ -178,10 +179,18 @@ def main():
 	decoders = [RulesDecoder(thresholds=th, stability=stab) for _ in range(n_domains)]
 	actuators = [PulseActuator(a_cfg, dt=dt) for _ in range(n_domains)]
 
-	# Initial state
+	# Initial state: uniform V/E, then domain-specific injuries
 	tissue.set_initial(-18.0)
 	healthy_ref = float(tcfg.get("healthy_ref_mV", float(tcfg["EL"]) + 5.0))
 	recorder.set_healthy_ref(healthy_ref)
+
+	injuries_cfg = cfg.get("injuries", {}).get("domains", [])
+	if injuries_cfg:
+		V0 = tissue.V.copy()
+		E0_grid = energy.E.copy()
+		V0, E0_grid = apply_domain_injuries(V0, E0_grid, domain_slices, injuries_cfg)
+		tissue.V[...] = V0
+		energy.E[...] = E0_grid
 
 	# Optional window for coupling estimation
 	V_window = []
