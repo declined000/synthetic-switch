@@ -19,24 +19,27 @@ from ..eval.metrics import compute_recovery_time, compute_flicker_rate, compute_
 Biological mapping (sentinel cell circuit)
 
 - V_mem sensor (NFAT/CREB + Signal V) → TF_depol
-    ≈ Recorder.low_occ (time-in-LOW band); tf_depol = mean(low_occ)
+    ≈ Recorder.low_occ (time-in-LOW band); tf_depol_k = mean(low_occ in domain k)
 
 - Energy sensor (AMPK-responsive promoter) → TF_EnergyOK
-    ≈ Energy.E grid + energy_gate(E_mean, Emin_eff)
+    ≈ Energy.E grid + energy_gate(E_k, Emin_eff)
 
 - Geometry sensor (paracrine/gap-junction comparison) → TF_GeometryOK
-    ≈ neighbor_mismatch(V) + geometry_gate(...)
+    ≈ neighbor_mismatch(V) in domain k + geometry_gate(...)
 
 - Global state sensor (frequency-sensitive CREB / NFAT) → TF_GlobalOK
     ≈ OscillationDetector (PLV with persistence) + global_v_offset override
 
-- Logic / memory:
+- Logic / memory (per domain k):
     RulesDecoder (REST / REPAIR / PRUNE) with hysteresis + dwell
     ↔ dCas9 CRISPRi/a logic implementing REST/REPAIR/PRUNE and gates.
 
-- Factor H gene / protein:
-    PulseActuator: Hill(TF_depol; n, K_H) scales amplitude of Kir2.1-like
-    hyperpolarizing pulses under energy + oscillation + geometry gates.
+- Controller health flag h_k:
+    h_k = 1 → controller functional, h_k = 0 → domain can never enter REPAIR.
+
+- Factor H gene / protein (per domain k):
+    PulseActuator_k: Hill(TF_depol_k; n, K_H) scales amplitude of Kir2.1-like
+    hyperpolarizing pulses in domain k under energy + oscillation + geometry gates.
 """
 
 
@@ -68,13 +71,18 @@ def main():
 	tcfg = cfg["tissue"]
 	ecfg = cfg["energy"]
 	rcfg = RecorderConfig(**cfg["recorder"])
+
 	osc_cfg_raw = dict(cfg["osc"])
-	# Light band-pass default (optional): pass bands only if provided in YAML; else leave None
+	# Optional band-pass; only if provided
 	if "bandpass" in cfg.get("osc", {}):
-		osc_cfg_raw["bandpass"] = tuple(cfg["osc"]["bandpass"])  # [lo, hi]
-	ocfg = OscConfig(**osc_cfg_raw, min_bad_duration_s=float(cfg.get("osc_extras", {}).get("min_bad_duration_s", 0.0)))
+		osc_cfg_raw["bandpass"] = tuple(cfg["osc"]["bandpass"])
+	ocfg = OscConfig(
+		**osc_cfg_raw,
+		min_bad_duration_s=float(cfg.get("osc_extras", {}).get("min_bad_duration_s", 0.0)),
+	)
+
 	geom_cfg = cfg.get("geometry", {})
-	a_cfg = ActuationConfig(**cfg["actuation"])  # amplitude_mV, duty, period_s, refractory_s, cap_when_lowE
+	a_cfg = ActuationConfig(**cfg["actuation"])
 
 	dec_cfg = cfg.get("decoder", {})
 	stab = DecoderStability(
@@ -93,6 +101,7 @@ def main():
 
 	min_coupling = float(geom_cfg.get("min_coupling_for_consensus", 0.1))
 	estimate_coupling = bool(geom_cfg.get("estimate_coupling", True))
+
 	grid_h, grid_w = int(tcfg["grid"][0]), int(tcfg["grid"][1])
 	dt = float(tcfg["dt"])
 	steps = int(tcfg["steps"])
@@ -100,29 +109,76 @@ def main():
 
 	seed = int(cfg.get("seed", 1337))
 
+	# Multi-domain partition D_k
+	domain_cfg = cfg.get("domains", {})
+	tile = domain_cfg.get("tile", None)
+	if tile is None:
+		tile_h, tile_w = grid_h, grid_w  # single domain
+	else:
+		tile_h, tile_w = int(tile[0]), int(tile[1])
+
+	if grid_h % tile_h != 0 or grid_w % tile_w != 0:
+		raise ValueError(
+			f"tissue.grid={tcfg['grid']} must be divisible by domains.tile={[tile_h, tile_w]}"
+		)
+
+	n_dom_h = grid_h // tile_h
+	n_dom_w = grid_w // tile_w
+	n_domains = n_dom_h * n_dom_w
+
+	domain_slices = []
+	for di in range(n_dom_h):
+		for dj in range(n_dom_w):
+			i0 = di * tile_h
+			i1 = (di + 1) * tile_h
+			j0 = dj * tile_w
+			j1 = (dj + 1) * tile_w
+			domain_slices.append((slice(i0, i1), slice(j0, j1)))
+
+	# Controller health flags h_k (loss-of-function mutations)
+	drop_cfg = domain_cfg.get("dropout", {})
+	drop_frac = float(drop_cfg.get("frac", 0.0))
+	drop_seed = int(drop_cfg.get("seed", seed))
+	rng_drop = np.random.default_rng(drop_seed)
+	if drop_frac <= 0.0:
+		controller_health = np.ones(n_domains, dtype=bool)
+	else:
+		controller_health = rng_drop.random(n_domains) > drop_frac
+
+	# Core components
 	recorder = Recorder(rcfg, grid=(grid_h, grid_w), dt=dt)
 	osc = OscillationDetector(ocfg, grid=(grid_h, grid_w), dt=dt)
-	tissue = Tissue(TissueConfig(
-		grid=(grid_h, grid_w),
-		dt=dt,
-		EL=float(tcfg["EL"]),
-		gL=float(tcfg["gL"]),
-		coupling_D=float(tcfg["coupling_D"]),
-		noise_rms=float(tcfg.get("noise_rms", 0.0)),
-		boundary=str(tcfg.get("boundary", "periodic")),
-	), seed=seed)
-	energy = Energy(EnergyConfig(
-		grid=(grid_h, grid_w),
-		E0=float(ecfg["E0"]),
-		k_oxphos=float(ecfg["k_oxphos"]),
-		alpha_actuation_cost=float(ecfg["alpha_actuation_cost"]),
-		beta_tnt_flux=float(ecfg["beta_tnt_flux"]),
-		gamma_decay=float(ecfg["gamma_decay"]),
-		Emin=float(ecfg["Emin"]),
-	))
-	actuator = PulseActuator(a_cfg, dt=dt)
-	decoder = RulesDecoder(thresholds=th, stability=stab)
 
+	tissue = Tissue(
+		TissueConfig(
+			grid=(grid_h, grid_w),
+			dt=dt,
+			EL=float(tcfg["EL"]),
+			gL=float(tcfg["gL"]),
+			coupling_D=float(tcfg["coupling_D"]),
+			noise_rms=float(tcfg.get("noise_rms", 0.0)),
+			boundary=str(tcfg.get("boundary", "periodic")),
+		),
+		seed=seed,
+	)
+
+	energy = Energy(
+		EnergyConfig(
+			grid=(grid_h, grid_w),
+			E0=float(ecfg["E0"]),
+			k_oxphos=float(ecfg["k_oxphos"]),
+			alpha_actuation_cost=float(ecfg["alpha_actuation_cost"]),
+			beta_tnt_flux=float(ecfg["beta_tnt_flux"]),
+			gamma_decay=float(ecfg["gamma_decay"]),
+			Emin=float(ecfg["Emin"]),
+		)
+	)
+
+	# One decoder + actuator per domain
+	decoders = [RulesDecoder(thresholds=th, stability=stab) for _ in range(n_domains)]
+	actuators = [PulseActuator(a_cfg, dt=dt) for _ in range(n_domains)]
+
+	# Initial state
 	tissue.set_initial(-18.0)
 	healthy_ref = float(tcfg.get("healthy_ref_mV", float(tcfg["EL"]) + 5.0))
 	recorder.set_healthy_ref(healthy_ref)
@@ -131,48 +187,48 @@ def main():
 	V_window = []
 	max_frames = 50
 
-	# Metric series
+	# Metric series (global)
 	actions_series = []
 	plv_series = []
 	domain_low_series = []
 
-	# Global V offset persistence for override
+	# Global V offset persistence
 	gvo_bad_seconds = 0.0
 
-	rows = []
+	# Logging
+	atlas_rows = []
+	domain_rows = []
+
 	for step in range(steps):
+		t = step * dt
+
+		# --- Update oscillation detector with current Vmem ---
 		osc.update(tissue.V)
 
 		V = tissue.V
+		E_grid = energy.E
+
+		# --- Local sensing: LOW bands, chronic occupancy, mismatch, offset ---
 		recorder.update_bands(V)
 		recorder.update_low_occupancy()
+
 		mismatch_grid = recorder.neighbor_mismatch(V)
 		mismatch_mean = float(mismatch_grid.mean())
-		low_occ_mean = float(recorder.low_occ.mean())
-		E_mean = float(energy.E.mean())
+
+		low_state_grid = recorder.low_state
+		low_occ_grid = recorder.low_occ
+		low_occ_mean = float(low_occ_grid.mean())
+
+		E_mean = float(E_grid.mean())
 		plv, plv_bad = osc.plv_with_persistence()
 		plv_series.append(plv)
-		domain_low_frac = float(recorder.domain_low_fraction())
-		domain_low_series.append(domain_low_frac)
+
+		domain_low_frac_global = float(recorder.domain_low_fraction())
+		domain_low_series.append(domain_low_frac_global)
+
 		global_v_off = float(recorder.global_v_offset(V))
 
-		# --- NEW: transcription-factor proxy for depolarization (TF_depol) ---
-		# Recorder.low_occ is already a leaky LOW-occupancy fraction in [0,1].
-		# We treat its spatial mean as the domain-level TF_depol driving Factor H.
-		tf_depol = max(0.0, min(1.0, low_occ_mean))
-
-		# Decoder action with offset/domain context
-		action = decoder.decide(
-			low_occ=low_occ_mean,
-			mismatch=mismatch_mean,
-			E=E_mean,
-			plv=(plv if plv is not None else None),
-			global_v_offset_mV=global_v_off,
-			domain_low_fraction=domain_low_frac,
-		)
-		actions_series.append(action)
-
-		# Coupling estimate for geometry gate
+		# --- Estimate coupling for geometry gate (global) ---
 		D_est = None
 		if estimate_coupling:
 			V_window.append(V.copy())
@@ -181,8 +237,8 @@ def main():
 			if len(V_window) >= 4:
 				D_est = float(estimate_coupling_shortlag(np.stack(V_window, axis=0)))
 
-		# Energy gate with adaptive Emin
-		domain_lowE_fraction = float(np.mean(energy.E < float(ecfg["Emin"])))
+		# --- Energy gate with adaptive Emin (global Emin_eff, domain-local E_k) ---
+		domain_lowE_fraction = float(np.mean(E_grid < float(ecfg["Emin"])))
 		Emin_eff = compute_adaptive_emin(
 			float(ecfg["Emin"]),
 			domain_lowE_fraction,
@@ -190,61 +246,154 @@ def main():
 			float(cfg.get("energy_extras", {}).get("adaptive_emin", {}).get("k", 0.0)),
 			float(cfg.get("energy_extras", {}).get("adaptive_emin", {}).get("min", float(ecfg["Emin"]))),
 		)
-		Eok = energy_gate(E_mean, Emin_eff) if cfg["safety"].get("enable_energy_gate", True) else True
 
-		# Oscillation gate with PLV persistence + global_v_offset override (sustained high offset)
+		# --- Oscillation gate with PLV persistence + global offset override ---
 		OscOK = oscillation_gate(bool(plv_bad)) if cfg["safety"].get("enable_osc_gate", True) else True
+
 		gvo_thresh = float(cfg.get("thresholds", {}).get("global_v_offset_mV", 10.0))
 		if abs(global_v_off) >= gvo_thresh:
 			gvo_bad_seconds += dt
 		else:
 			gvo_bad_seconds = max(0.0, gvo_bad_seconds - dt)
+
 		# If sustained offset high for same persistence window, treat as bad oscillation
 		if gvo_bad_seconds >= float(cfg.get("osc_extras", {}).get("min_bad_duration_s", 0.0)):
 			OscOK = True
 
-		# Geometry gate
-		GeomOK = geometry_gate(mismatch_mean, float(rcfg.mismatch_threshold), D_est, min_coupling) \
-			if cfg["safety"].get("enable_geometry_gate", True) else True
+		# --- Domain-level control loop ---
+		u_act = np.zeros_like(V)
+		max_action_this_step = 0
 
-		allow_pulse = (action == 1) and Eok and OscOK and GeomOK
+		log_this_step = (step % atlas_stride == 0)
 
-		u_act = actuator.step(
-			allow=allow_pulse,
-			E_ok=Eok,
-			shape=V.shape,
-			depol_signal=tf_depol,  # TF_depol → Hill → Factor H → Kir2.1 efflux
-		)
-		tissue.step(u_act=u_act)
-		energy.step(dt=dt, u_act=u_act, u_tnt_ev=0.0)
+		for k, (sl_i, sl_j) in enumerate(domain_slices):
+			V_dom = V[sl_i, sl_j]
+			E_dom = E_grid[sl_i, sl_j]
 
-		V = tissue.V
+			low_occ_dom = float(low_occ_grid[sl_i, sl_j].mean())
+			mismatch_dom = float(mismatch_grid[sl_i, sl_j].mean())
+			low_frac_dom = float(low_state_grid[sl_i, sl_j].mean())
+			E_dom_mean = float(E_dom.mean())
+
+			# TF_depol derived from chronic LOW occupancy in this domain
+			tf_depol = max(0.0, min(1.0, low_occ_dom))
+
+			# REST/REPAIR/PRUNE decision for domain k
+			if controller_health[k]:
+				action_k = decoders[k].decide(
+					low_occ=low_occ_dom,
+					mismatch=mismatch_dom,
+					E=E_dom_mean,
+					plv=(plv if plv is not None else None),
+					global_v_offset_mV=global_v_off,
+					domain_low_fraction=low_frac_dom,
+				)
+			else:
+				# Loss-of-function mutation: controller permanently OFF (stays at REST)
+				action_k = 0
+
+			# Domain-level energy & geometry gates
+			Eok_dom = energy_gate(E_dom_mean, Emin_eff) if cfg["safety"].get("enable_energy_gate", True) else True
+			GeomOK_dom = geometry_gate(
+				mismatch_dom,
+				float(rcfg.mismatch_threshold),
+				D_est,
+				min_coupling,
+			) if cfg["safety"].get("enable_geometry_gate", True) else True
+
+			allow_pulse = (
+				(action_k == 1)  # REPAIR
+				and Eok_dom
+				and OscOK
+				and GeomOK_dom
+				and controller_health[k]
+			)
+
+			u_dom = actuators[k].step(
+				allow=allow_pulse,
+				E_ok=Eok_dom,
+				shape=V_dom.shape,
+				depol_signal=tf_depol,
+			)
+			u_act[sl_i, sl_j] += u_dom
+
+			max_action_this_step = max(max_action_this_step, int(action_k))
+
+			# Per-domain logging
+			if log_this_step:
+				domain_rows.append([
+					t,
+					k,
+					int(action_k),
+					float(V_dom.mean()),
+					low_occ_dom,
+					mismatch_dom,
+					E_dom_mean,
+					low_frac_dom,
+					1.0 if controller_health[k] else 0.0,
+				])
+
+		# Global "action" summary for flicker metric
+		actions_series.append(max_action_this_step)
+
+		# --- Global logging (unchanged schema) ---
 		mean_V = float(V.mean())
-
-		if step % atlas_stride == 0:
-			rows.append([
-				step * dt,
-				action,
+		if log_this_step:
+			atlas_rows.append([
+				t,
+				max_action_this_step,
 				mean_V,
 				low_occ_mean,
 				mismatch_mean,
-				float(energy.E.mean()),
+				float(E_grid.mean()),
 				plv if plv is not None else "",
 				global_v_off,
-				domain_low_frac,
-				0.0,
+				domain_low_frac_global,
+				0.0,  # redox_bit placeholder
 				("" if D_est is None else D_est),
 			])
 
+		# --- Advance tissue and energy with total actuation ---
+		tissue.step(u_act=u_act)
+		energy.step(dt=dt, u_act=u_act, u_tnt_ev=0.0)
+
+	# --- Write global event atlas ---
 	atlas_cols = [
-		"t","action","mean_V","LOW_occ","mismatch","E","PLV",
-		"global_v_offset","domain_low_fraction","redox_bit","D_est",
+		"t",
+		"action",
+		"mean_V",
+		"LOW_occ",
+		"mismatch",
+		"E",
+		"PLV",
+		"global_v_offset",
+		"domain_low_fraction",
+		"redox_bit",
+		"D_est",
 	]
 	with open(out_dir / "event_atlas.csv", "w", newline="", encoding="utf-8") as f:
 		writer = csv.writer(f)
 		writer.writerow(atlas_cols)
-		writer.writerows(rows)
+		writer.writerows(atlas_rows)
 
+	# --- Write per-domain atlas ---
+	domain_atlas_cols = [
+		"t",
+		"domain_id",
+		"action",
+		"mean_V_dom",
+		"LOW_occ_dom",
+		"mismatch_dom",
+		"E_dom",
+		"domain_low_fraction_dom",
+		"controller_health",
+	]
+	with open(out_dir / "domain_atlas.csv", "w", newline="", encoding="utf-8") as f:
+		writer = csv.writer(f)
+		writer.writerow(domain_atlas_cols)
+		writer.writerows(domain_rows)
+
+	# --- Summary metrics (still global) ---
 	recovery_step = compute_recovery_time(domain_low_series, dt=dt, threshold=0.10, dwell_s=60.0)
 	flicker = compute_flicker_rate(actions_series, dt=dt, warmup_s=0.0)
 	plv_ret = compute_plv_retention(plv_series, dt=dt, window_s=300.0)
@@ -253,14 +402,20 @@ def main():
 		"recovery_time_step": int(recovery_step) if recovery_step is not None else None,
 		"flicker_rate": float(flicker),
 		"PLV_retention": None if plv_ret is None else float(plv_ret),
-		"final_mean_V": float(tissue.V.mean()) if rows else None,
-		"final_mean_E": float(energy.E.mean()) if rows else None,
+		"final_mean_V": float(tissue.V.mean()) if atlas_rows else None,
+		"final_mean_E": float(energy.E.mean()) if atlas_rows else None,
+		"n_domains": int(n_domains),
+		"domain_tile": [tile_h, tile_w],
+		"controller_dropout_frac": float(drop_frac),
 	}
 	with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
 		json.dump(summary, f, indent=2)
 
-	print(f"Wrote atlas rows: {len(rows)} to {out_dir / 'event_atlas.csv'}", flush=True)
+	print(f"Wrote {len(atlas_rows)} global atlas rows to {out_dir / 'event_atlas.csv'}", flush=True)
+	print(f"Wrote {len(domain_rows)} domain atlas rows to {out_dir / 'domain_atlas.csv'}", flush=True)
 
 
 if __name__ == "__main__":
 	main()
+
+

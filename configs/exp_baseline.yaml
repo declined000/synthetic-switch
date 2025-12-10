@@ -24,6 +24,16 @@ actuation:
   hill_K: 0.3          # TF_depol ~0.3 → half-maximal actuation
   hill_input_scale: 1.0
 
+domains:
+  # Tile size of each domain in cells (h, w). Must exactly divide the tissue grid.
+  # For a 10x10 grid and tile [5,5] → 4 domains (2x2).
+  tile: [5, 5]
+
+  # Loss-of-function mutations in the controller population.
+  dropout:
+    frac: 0.25    # fraction of domains with h_k = 0 (controller lost)
+    seed: 1337    # RNG seed for reproducibility
+
 safety:  { enable_energy_gate: true, enable_osc_gate: true, enable_geometry_gate: true }
 logging: { atlas_stride: 10 }
 
