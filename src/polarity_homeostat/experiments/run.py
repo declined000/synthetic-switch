@@ -109,6 +109,8 @@ def main():
 	atlas_stride = int(cfg.get("logging", {}).get("atlas_stride", 10))
 
 	seed = int(cfg.get("seed", 1337))
+	ablation_cfg = cfg.get("ablation", {}) or {}
+	actuation_enabled = bool(ablation_cfg.get("actuation_enabled", True))
 
 	# Multi-domain partition D_k
 	domain_cfg = cfg.get("domains", {})
@@ -311,7 +313,8 @@ def main():
 			) if cfg["safety"].get("enable_geometry_gate", True) else True
 
 			allow_pulse = (
-				(action_k == 1)  # REPAIR
+				actuation_enabled
+				and (action_k == 1)  # REPAIR
 				and Eok_dom
 				and OscOK
 				and GeomOK_dom
@@ -416,6 +419,9 @@ def main():
 		"n_domains": int(n_domains),
 		"domain_tile": [tile_h, tile_w],
 		"controller_dropout_frac": float(drop_frac),
+		"actuation_enabled": bool(actuation_enabled),
+		"final_LOW_occ": float(low_occ_mean) if atlas_rows else None,
+		"final_domain_low_fraction": float(domain_low_series[-1]) if domain_low_series else None,
 	}
 	with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
 		json.dump(summary, f, indent=2)

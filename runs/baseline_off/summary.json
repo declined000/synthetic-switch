@@ -1,0 +1,16 @@
+{
+  "recovery_time_step": 43,
+  "flicker_rate": 0.00030003000300030005,
+  "PLV_retention": 0.4345478966763632,
+  "final_mean_V": -58.63856191644254,
+  "final_mean_E": 0.9523809523809496,
+  "n_domains": 4,
+  "domain_tile": [
+    5,
+    5
+  ],
+  "controller_dropout_frac": 0.25,
+  "actuation_enabled": false,
+  "final_LOW_occ": 0.0005431380807828908,
+  "final_domain_low_fraction": 0.0
+}
